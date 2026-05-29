@@ -1,4 +1,4 @@
-name: Continuous Integration (CI)
+name: Integración Continua (IC)
 
 on:
   push:
@@ -13,7 +13,7 @@ jobs:
     - name: Checkout Code
       uses: actions/checkout@v4
       with:
-        fetch-depth: 0  # Requerido por SonarCloud para analizar el historial de Git
+        fetch-depth: 0  # Crucial para que SonarCloud vea el historial de Git
 
     - name: Set up Python
       uses: actions/setup-python@v5
@@ -29,16 +29,15 @@ jobs:
 
     - name: Run Unit Tests with Coverage Enforcer
       run: |
-        # Ejecuta pruebas y genera los reportes xml y html
-        pytest --cov=src --cov-report=xml --cov-report=html tests/
+        # Esto genera el reporte real sobre tu carpeta challenge
+        pytest --cov=challenge --cov-report=xml:coverage.xml --cov-report=html:htmlcov tests/
         
     - name: Enforce Test Coverage Threshold (>= 85%)
       run: |
-        # Extrae el porcentaje total de cobertura de la consola y evalúa el mínimo
         COVERAGE=$(coverage report | grep TOTAL | awk '{print $4}' | sed 's/%//')
         echo "Total Code Coverage: $COVERAGE%"
         if [ "$COVERAGE" -lt 85 ]; then
-          echo "❌ ERROR: La cobertura de código es de $COVERAGE%, la cual es inferior al umbral mínimo requerido del 85%."
+          echo "❌ ERROR: La cobertura de código es de $COVERAGE%, inferior al 85% requerido."
           exit 1
         fi
         echo "✅ Cobertura aprobada con éxito."
@@ -50,8 +49,12 @@ jobs:
         path: htmlcov/
         retention-days: 7
 
+    # === EL PASO MÁGICO QUE LE MANDARÁ LOS DATOS A SONARCLOUD ===
     - name: SonarCloud Scan (Quality Gate)
       uses: Sonarsource/sonarcloud-github-action@v3.0.0
       env:
         GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         SONAR_TOKEN: ${{ secrets.SONAR_TOKEN }}
+      with:
+        args: >
+          -Dsonar.python.coverage.reportPaths=coverage.xml
