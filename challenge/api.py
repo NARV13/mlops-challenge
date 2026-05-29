@@ -72,8 +72,8 @@ def startup_event():
             
     except Exception as e:
         print(f"🚨 Alerta crítica en startup: No se pudo precargar el modelo local. Error: {e}")
-#@app.on_event("startup")
-#def startup_event():
+
+
 #    """Se ejecuta automáticamente al encender la API. Precarga el modelo desde MLflow @production."""
 #    try:
 #        print("⏳ API Iniciando: Cargando artefacto matemático desde el Model Registry...")
@@ -96,8 +96,8 @@ def health_check():
         "environment": "Production"
     }
 
-#@app.get("/health", status_code=status.HTTP_200_OK, tags=["Monitoreo"])
-#def health_check():
+
+
 #    """Verifica la disponibilidad básica del servicio (Health Check)."""
 #    # Si el modelo no se cargó en el startup, reportamos un estado degradado
 #    status_modelo = "Listo" if predictor.model is not None else "No Cargado (Verificar MLflow UI)"
