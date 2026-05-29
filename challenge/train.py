@@ -16,7 +16,7 @@ print("📢 ¡El archivo train.py se está ejecutando en PowerShell exitosamente
 print("1/4. Cargando módulos de conexión a BigQuery...")
 def main():
     # Token temporal para Google Cloud BigQuery
-    TOKEN_TEMPORAL = "ya29.a0AQvPyIONPxQzffOKhWWfHnmxZSMayl1giIBCNammcz5lA7JQOyoXvGEm6RkS3LxWzt5cq-ani0cCank1_1tngyQqrlrKpPSCgu-8ORrFTzBm4tpH21Ftf0vrjjCNrtcR4vQjinrs5ckByX_vJcDsDRJ2VceVkiY3HyXiXHgInXaoOrJoriREQYbAPiYpG1Mi-PQ4op3aksFRNHPICqaAIKRadvuZ5joU0gEwjftgzXNijv0_qf_I7rg_HOCT5GwBI8Kuh1d1UX-tj8YuQ_IVoxi78zzMbjXMKaAp-AKaezdt7fQ7nz2E-VwdRoKNZ-2Mb-6D1Fv_sBcJM6AWMr6qURbHjvQLu-tncTXYIwaCgYKAVYSARUSFQHGX2Mi4F8yXICzvhRJglPp56SQmQ0365"
+    TOKEN_TEMPORAL = os.getenv("GOOGLE_BIGQUERY_TOKEN", "TU_TOKEN_TEMPORAL_AQUI")
     print("2/4. Conectando y descargando datos de BigQuery...")
     credenciales = google.oauth2.credentials.Credentials(TOKEN_TEMPORAL)
     client = bigquery.Client(project='teen-mental-health-497520', credentials=credenciales)
@@ -102,7 +102,8 @@ def main():
         # EJECUCIÓN 2: RANDOM FOREST
         
         with mlflow.start_run(run_name="Random_Forest_Modelo"):
-            rand_forest = RandomForestClassifier(n_estimators=100, random_state=42)
+            rand_forest = RandomForestClassifier(n_estimators=100, random_state=42,min_samples_leaf=2, 
+        max_features='sqrt')
             mlflow.log_param("tipo_de_modelo", "Random Forest")
             
             rand_forest.fit(X_train, y_train)
