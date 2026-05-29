@@ -1,0 +1,23 @@
+artifact_path: file:///C:/Users/natal/mlops-challenge/mlruns/1/models/m-f5301f611b564fd0bf8dd8fcecc71815/artifacts
+flavors:
+  python_function:
+    env:
+      conda: conda.yaml
+      virtualenv: python_env.yaml
+    loader_module: mlflow.sklearn
+    model_path: model.pkl
+    predict_fn: predict
+    python_version: 3.11.9
+  sklearn:
+    code: null
+    pickled_model: model.pkl
+    serialization_format: cloudpickle
+    sklearn_version: 1.8.0
+    skops_trusted_types: null
+mlflow_version: 3.12.0
+model_id: m-f5301f611b564fd0bf8dd8fcecc71815
+model_size_bytes: 12480971
+model_uuid: m-f5301f611b564fd0bf8dd8fcecc71815
+prompts: null
+run_id: 07b52cd97f124ccda74dc622d86f2801
+utc_time_created: '2026-05-27 20:16:18.032373'

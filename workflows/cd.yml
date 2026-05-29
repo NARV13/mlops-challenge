@@ -1,0 +1,61 @@
+name: Continuous Deployment (CD)
+
+on:
+  push:
+    branches:
+      - develop
+      - 'release/*'
+      - main
+    tags:
+      - 'v*'
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    steps:
+    - name: Checkout Code
+      uses: actions/checkout@v4
+
+    - name: Set Environment Variables Dynamically
+      run: |
+        if [ "${{ github.ref }}" = "refs/heads/develop" ]; then
+          echo "GCP_PROJECT_ID=anxiety-prediction-dev" >> $GITHUB_ENV
+          echo "ENV_NAME=dev" >> $GITHUB_ENV
+        elif [[ "${{ github.ref }}" =~ refs/heads/release/.* ]]; then
+          echo "GCP_PROJECT_ID=anxiety-prediction-qa" >> $GITHUB_ENV
+          echo "ENV_NAME=qa" >> $GITHUB_ENV
+        elif [ "${{ github.ref }}" = "refs/heads/main" ] || [[ "${{ github.ref }}" =~ refs/tags/v.* ]]; then
+          echo "GCP_PROJECT_ID=anxiety-prediction-prod" >> $GITHUB_ENV
+          echo "ENV_NAME=prod" >> $GITHUB_ENV
+        fi
+
+    - name: Authenticate with Google Cloud
+      uses: google-github-actions/auth@v2
+      with:
+        credentials_json: ${{ secrets.GCP_SA_KEY }} # Llave de la cuenta de servicio de despliegue de GitHub
+
+    - name: Set up Cloud SDK
+      uses: google-github-actions/setup-gcloud@v2
+
+    - name: Configure Docker for Artifact Registry
+      run: |
+        gcloud auth configure-docker southamerica-east1-docker.pkg.dev --quiet
+
+    - name: Build and Push Docker Image
+      run: |
+        IMAGE_URI="southamerica-east1-docker.pkg.dev/${{ env.GCP_PROJECT_ID }}/anxiety-api-repo-${{ env.ENV_NAME }}/anxiety-api:${{ github.sha }}"
+        
+        # Construye la imagen usando el commit hash actual como tag inmutable
+        docker build -t $IMAGE_URI .
+        docker push $IMAGE_URI
+        
+        # Guarda la URI en el entorno para el siguiente paso
+        echo "IMAGE_URI=$IMAGE_URI" >> $GITHUB_ENV
+
+    - name: Deploy to Google Cloud Run
+      run: |
+        gcloud run deploy anxiety-api-service-${{ env.ENV_NAME }} \
+          --image=${{ env.IMAGE_URI }} \
+          --region=southamerica-east1 \
+          --project=${{ env.GCP_PROJECT_ID }} \
+          --allow-unauthenticated

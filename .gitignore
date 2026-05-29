@@ -1,0 +1,18 @@
+# Terraform
+.terraform/
+*.exe
+*.lock.hcl
+*.tfstate
+*.tfstate.backup
+fake-credentials.json
+
+# Python y Entornos
+.venv/
+__pycache__/
+*.pyc
+
+# MLflow y Datos Locales
+mlruns/
+mlflow.db
+data_local.csv
+*.pkl
