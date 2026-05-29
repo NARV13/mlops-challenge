@@ -1,14 +1,15 @@
-#Import librerias para el modelo de ML
+# Importar librerías para el modelo de ML
 import os
 import sys
 import pickle
-import mlflow.pyfunc
 import pandas as pd
 
-
 # CONFIGURACIÓN CRÍTICA PARA EVITAR BLOQUEOS EN POWERSHELL (PS)
-
 os.environ["PYTHONIOENCODING"] = "utf-8"
+
+# SonarQube S1192: Constante global para evitar duplicar el string literal en el código
+COLUMNS_FILE_NAME = "columns.pkl"
+
 
 class AnxietyPredictionModel:
     def __init__(self):
@@ -17,34 +18,8 @@ class AnxietyPredictionModel:
         self.model = None
         self.features_columns = None
 
-    def load_model_for_inference(self):
-        print("⏳ API Iniciando: Cargando artefacto matemático...")
-        
-        # Definimos la ruta local interna del contenedor
-        local_path = os.path.join(os.path.dirname(__file__), "best_model")
-        
-        if os.path.exists(local_path):
-            try:
-                print("📦 Cargando modelo desde artefactos locales autocontenidos...")
-                # Cargamos el modelo localmente sin tocar la red
-                self.model = mlflow.pyfunc.load_model(local_path)
-                print("🚀 Modelo cargado exitosamente desde empaquetado local.")
-                return
-            except Exception as e:
-                print(f"🚨 Error al cargar el modelo local: {e}")
-        else:
-            print(f"❌ No se encontró la carpeta local en: {local_path}")
-            # Aquí puedes dejar tu código de MLflow viejo solo como un fallback por si acaso
-    
-    #def _init_mlflow(self):
-    #    """Inicializa MLflow de forma perezosa para evitar conflictos de hilos."""
-    #    import mlflow
-    #    mlflow.set_experiment(self.experiment_name)
-    #    return mlflow
-
     def load_data(self, file_path: str = "data_local.csv") -> pd.DataFrame:
-        """Carga los datos de entrenamiento desde un archivo local seguro,
-        evitando bloqueos de red en la terminal."""
+        """Carga los datos de entrenamiento desde un archivo local seguro."""
         if not os.path.exists(file_path):
             raise FileNotFoundError(
                 f"🚨 No se encontró el archivo local '{file_path}'. "
@@ -55,14 +30,11 @@ class AnxietyPredictionModel:
     def train_and_evaluate(self, df: pd.DataFrame):
         """Entrena, evalúa y registra ambos modelos en el tracker local de MLflow."""
         from sklearn.model_selection import train_test_split
-        from sklearn.linear_model import LogisticRegression
         from sklearn.ensemble import RandomForestClassifier
         from sklearn.metrics import accuracy_score
         import mlflow.sklearn
 
-        mlflow = self._init_mlflow()
-
-        # Localizar dinámicamente la columna objetivo
+        # Buscar la columna objetivo de ansiedad
         columna_target = None
         for col in df.columns:
             if "anxiety" in col.lower():
@@ -77,40 +49,24 @@ class AnxietyPredictionModel:
         X = df_encoded.drop(columns=[c for c in df_encoded.columns if columna_target in c])
         y = df[columna_target]
         
-        # Guardar el listado de columnas para producción
+        # Guardar el listado de columnas usando la constante global para producción
         self.features_columns = X.columns.tolist()
-        with open("columns.pkl", "wb") as f:
+        with open(COLUMNS_FILE_NAME, "wb") as f:
             pickle.dump(self.features_columns, f)
 
         X_train, X_test, y_train, y_test = train_test_split(
             X, y, test_size=0.20, random_state=42, stratify=y
         )
 
-        # --- RUN 1: REGRESIÓN LOGÍSTICA ---
-        with mlflow.start_run(run_name="Regresion_Logistica_Modelo"):
-            lr_model = LogisticRegression(max_iter=1000, random_state=42)
-            mlflow.log_param("tipo_de_modelo", "Regresión Logística")
-            lr_model.fit(X_train, y_train)
-            preds = lr_model.predict(X_test)
-            acc = accuracy_score(y_test, preds)
-            mlflow.log_metric("exactitud", acc)
-            
-            mlflow.sklearn.log_model(
-                sk_model=lr_model, 
-                artifact_path="modelo", 
-                registered_model_name=self.model_name
-            )
-            print(f"   -> [MLflow] Regresión Logística registrada (Accuracy: {acc:.4f})")
-
-        # --- RUN 2: RANDOM FOREST ---
+        # Registro del modelo en MLflow
         with mlflow.start_run(run_name="Random_Forest_Modelo"):
-            rf_model = RandomForestClassifier(n_estimators=100, random_state=42)
-            mlflow.log_param("tipo_de_modelo", "Random Forest")
+            rf_model = RandomForestClassifier(n_estimators=100, random_state=42,min_samples_leaf=2, 
+        max_features='sqrt')
             rf_model.fit(X_train, y_train)
             preds_rf = rf_model.predict(X_test)
             acc_rf = accuracy_score(y_test, preds_rf)
-            mlflow.log_metric("exactitud", acc_rf)
             
+            mlflow.log_metric("exactitud", acc_rf)
             mlflow.sklearn.log_model(
                 sk_model=rf_model, 
                 artifact_path="modelo", 
@@ -119,62 +75,71 @@ class AnxietyPredictionModel:
             print(f"   -> [MLflow] Random Forest registrado (Accuracy: {acc_rf:.4f})")
 
     def load_model_for_inference(self):
-        """Carga dinámicamente el modelo activo desde el Registry usando el alias @production."""
+        """Carga dinámicamente el modelo activo desde el Registry de MLflow y recupera las columnas estructuradas."""
         import mlflow.sklearn
         try:
-            # Guiar a MLflow hacia la dirección del servidor local
             mlflow.set_tracking_uri("http://127.0.0.1:5000")
             
-            model_uri = f"models:/{self.model_name}@production"
-            self.model = mlflow.sklearn.load_model(model_uri)
+            # Cargar el modelo desde el Model Registry
+            try:
+                model_uri = f"models:/{self.model_name}@production"
+                self.model = mlflow.sklearn.load_model(model_uri)
+            except Exception:
+                from mlflow.tracking import MlflowClient
+                client = MlflowClient()
+                latest_versions = client.get_latest_versions(self.model_name)
+                if latest_versions:
+                    self.model = mlflow.sklearn.load_model(latest_versions[0].source)
+                else:
+                    raise LookupError("No se encontraron versiones registradas para este modelo en MLflow.")
             
-            if os.path.exists("columns.pkl"):
-                with open("columns.pkl", "rb") as f:
-                    self.features_columns = pickle.load(f)
-            print("✅ Modelo en producción cargado correctamente desde MLflow Registry.")
+            # Búsqueda robusta y absoluta del archivo usando la constante global
+            base_dir = os.path.dirname(os.path.abspath(__file__))
+            possible_paths = [
+                os.path.join(base_dir, COLUMNS_FILE_NAME),
+                os.path.join(base_dir, "..", COLUMNS_FILE_NAME),
+                COLUMNS_FILE_NAME
+            ]
+            
+            for path in possible_paths:
+                if os.path.exists(path):
+                    with open(path, "rb") as f:
+                        self.features_columns = pickle.load(f)
+                    print(f"✅ Éxito: Columnas de entrenamiento recuperadas desde {path}.")
+                    break
+                    
+            if not self.features_columns:
+                print(f"⚠️ Advertencia: No se pudo localizar el archivo '{COLUMNS_FILE_NAME}' en las rutas buscadas.")
+                
+            print("✅ Modelo cargado correctamente en memoria RAM.")
         except Exception as e:
-            raise RuntimeError(f"Error al conectar con MLflow Server para descargar el modelo: {e}")
+            raise RuntimeError(f"Falla crítica en la inicialización de la inferencia: {e}")
 
     def predict(self, data: pd.DataFrame) -> list:
-        """Realiza predicciones estructuradas para uno o múltiples registros de entrada.
-        Devuelve una lista de enteros nativos válidos para respuestas JSON."""
+        """Realiza predicciones aplicando el reindexado con las columnas de entrenamiento."""
         if self.model is None:
             raise ValueError("El modelo de producción no está cargado en memoria.")
         
-        # Asegurar One-Hot Encoding idéntico al entrenamiento
+        # Generar las columnas del One-Hot encoding para la data entrante
         data_encoded = pd.get_dummies(data)
         
-        # Reindexar para garantizar que tenga exactamente las mismas columnas y orden que vio el modelo
+        # Alinear el DataFrame entrante con las columnas exactas del entrenamiento
         if self.features_columns:
             data_encoded = data_encoded.reindex(columns=self.features_columns, fill_value=0)
             
-        # Obtener las predicciones base de numpy
         raw_predictions = self.model.predict(data_encoded)
-        
-        # Convertir a tipos de datos nativos de Python (int) para evitar fallos de serialización JSON en la API
         return [int(pred) for pred in raw_predictions]
 
 
-
-# VERIFICACIÓN LOCAL DESACOPLADA DE RED
-
 if __name__ == "__main__":
     print("📢 ¡El archivo model.py se está ejecutando en PowerShell exitosamente!")
-    
     pipeline = AnxietyPredictionModel()
-    
     try:
-        print("⏳ Conectando al Model Registry local...")
         pipeline.load_model_for_inference()
-        
-        print("⏳ Validando formato de la función predict()...")
         if pipeline.features_columns:
-            # Crear un dataframe dummy basado en las columnas de entrenamiento
             sample_df = pd.DataFrame([0] * len(pipeline.features_columns)).T
             sample_df.columns = pipeline.features_columns
             res = pipeline.predict(sample_df)
-            print(f"🎉 ¡Prueba de inferencia exitosa! Predicción obtenida: {res}")
-            
+            print(f"🎉 ¡Prueba exitosa! Predicción: {res}")
     except Exception as e:
         print(f"ℹ️ Nota de inicialización: {e}")
-        print("👉 Recuerda que para entrenar por primera vez, debes pasarle un DataFrame local.")

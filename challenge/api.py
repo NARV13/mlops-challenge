@@ -1,5 +1,6 @@
 import os
 import sys
+import pickle
 import pandas as pd
 from typing import List
 from fastapi import FastAPI, HTTPException, status
@@ -18,6 +19,9 @@ app = FastAPI(
 # Instanciar el motor del modelo global
 predictor = AnxietyPredictionModel()
 
+# SonarQube S1192: Constante global para evitar duplicar el string literal en el código
+COLUMNS_ARTIFACT_NAME = "columns.pkl"
+
 
 # MODELOS DE PYDANTIC (Esquema de entrada exacto para el Swagger)
 
@@ -33,7 +37,7 @@ class PatientData(BaseModel):
     Study_Satisfaction: int = Field(..., description="Nivel de satisfacción con el estudio (1-10)", example=5)
 
     class Config:
-        extra = "ignore"  # Ignora campos dinámicos residuales de Swagger como additionalProp1
+        extra = "ignore"  # Ignora campos dinámicos residuales de Swagger
 
 
 class PredictionRequest(BaseModel):
@@ -44,15 +48,56 @@ class PredictionResponse(BaseModel):
     predictions: List[int] = Field(..., description="Lista de niveles de ansiedad predichos por el modelo.")
 
 
+# FUNCIONES DE SOPORTE (Reduce Complejidad Cognitiva - SonarQube S3776)
+
+def find_local_artifact_path(base_directory: str, filename: str) -> str:
+    """Busca de forma segura un archivo en las distintas rutas posibles del contenedor."""
+    parent_directory = os.path.dirname(base_directory)
+    possible_paths = [
+        os.path.join(parent_directory, filename),
+        os.path.join(base_directory, filename),
+        filename
+    ]
+    for current_path in possible_paths:
+        if os.path.exists(current_path):
+            return current_path
+    return ""
+
+
 # EVENTOS DE CICLO DE VIDA (Lifecycle Events)
 
 @app.on_event("startup")
 def startup_event():
     try:
-        # Carga nativa del modelo y recuperación del listado columns.pkl
+        print("⏳ API Iniciando: Intentando conectar al Model Registry de MLflow...")
         predictor.load_model_for_inference()
     except Exception as e:
-        print(f"🚨 Alerta en startup: No se pudo precargar desde MLflow. Detalle: {e}")
+        print(f"🚨 Alerta en startup: No se pudo conectar a MLflow de forma directa. Detalle: {e}")
+        print("📦 Iniciando plan de contingencia: Cargando artefactos locales...")
+        
+        try:
+            import mlflow.sklearn
+            base_dir = os.path.dirname(os.path.abspath(__file__))
+            
+            # 1. Localizar y cargar el modelo físico localmente
+            local_model_path = find_local_artifact_path(base_dir, "best_model")
+            if local_model_path:
+                predictor.model = mlflow.sklearn.load_model(local_model_path)
+                print(f"🚀 ¡Éxito de contingencia! Modelo cargado desde: {local_model_path}")
+            else:
+                print("❌ Error crítico de contingencia: No se encontró la carpeta 'best_model' en ninguna ruta.")
+
+            # 2. Localizar y cargar las columnas físicas locales (EVITA EL ERROR 422)
+            local_columns_path = find_local_artifact_path(base_dir, COLUMNS_ARTIFACT_NAME)
+            if local_columns_path:
+                with open(local_columns_path, "rb") as f:
+                    predictor.features_columns = pickle.load(f)
+                print(f"✅ ¡Éxito de contingencia! Columnas fijadas desde {local_columns_path} ({len(predictor.features_columns)} variables).")
+            else:
+                print(f"❌ Error crítico de contingencia: No se encontró '{COLUMNS_ARTIFACT_NAME}' en ninguna ubicación.")
+
+        except Exception as e_local:
+            print(f"🚨 Falla crítica absoluta: El plan de contingencia local también falló: {e_local}")
 
 
 # ENDPOINTS HTTP
@@ -76,19 +121,18 @@ def predict_anxiety(payload: PredictionRequest):
         )
     
     try:
-        # 1. Convertir datos validados de Pydantic a lista de diccionarios
+        # 1. Convertir datos validados de Pydantic a lista de diccionarios planos (evita errores unhashable)
         raw_data = [patient.dict() for patient in payload.patients]
         df_input = pd.DataFrame(raw_data)
         
-        # 2. Convertir las columnas a minúsculas para que coincidan con el dataset original de entrenamiento
-        # Ejemplo: 'Age' -> 'age', 'Gender' -> 'gender'
+        # 2. Transformar las columnas entrantes a minúsculas para alinearlas con el dataset de entrenamiento
         df_input.columns = df_input.columns.str.lower()
         
-        # 3. Validar que la variable 'gender' mantenga consistencia con los strings del set de datos
+        # 3. Forzar tipo string seguro para la variable categórica género
         if "gender" in df_input.columns:
             df_input["gender"] = df_input["gender"].astype(str)
             
-        # 4. Enviar el DataFrame preprocesado al pipeline interno de model.py
+        # 4. Enviar el DataFrame preprocesado al pipeline interno del modelo
         result_predictions = predictor.predict(df_input)
         
         return PredictionResponse(predictions=result_predictions)
